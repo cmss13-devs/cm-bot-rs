@@ -211,6 +211,7 @@ fn build_notes_embeds(notes: &[&NoteResponse], ckey: &str, server: &str) -> Vec<
 /// Verify your account against the CM database
 #[poise::command(slash_command)]
 async fn verify(ctx: PoiseContext<'_>) -> Result<(), Error> {
+    eprintln!("[TIMING] verify command started: {:?}", std::time::Instant::now());
     let target_user = ctx.author();
 
     let Some(current_guild_id) = ctx.guild_id() else {
@@ -232,8 +233,11 @@ async fn verify(ctx: PoiseContext<'_>) -> Result<(), Error> {
         return Ok(());
     }
 
+    eprintln!("[TIMING] before defer: {:?}", std::time::Instant::now());
     ctx.defer().await?;
+    eprintln!("[TIMING] after defer: {:?}", std::time::Instant::now());
 
+    eprintln!("[TIMING] before verify_user API call: {:?}", std::time::Instant::now());
     match verify_user(
         &ctx.data().http_client,
         ctx.data().config.default_base_url(),
@@ -244,26 +248,36 @@ async fn verify(ctx: PoiseContext<'_>) -> Result<(), Error> {
     .await
     {
         Ok(Some(user_info)) => {
+            eprintln!("[TIMING] after verify_user API call (success): {:?}", std::time::Instant::now());
+            eprintln!("[TIMING] before member fetch: {:?}", std::time::Instant::now());
             let member = current_guild_id.member(ctx.http(), target_user.id).await?;
+            eprintln!("[TIMING] after member fetch: {:?}", std::time::Instant::now());
             for role_id in &user_info.roles_to_add {
                 if let Ok(id) = role_id.parse::<u64>() {
+                    eprintln!("[TIMING] before add_role {}: {:?}", id, std::time::Instant::now());
                     let _ = member.add_role(ctx.http(), serenity::RoleId::new(id)).await;
+                    eprintln!("[TIMING] after add_role {}: {:?}", id, std::time::Instant::now());
                 }
             }
             for role_id in &user_info.roles_to_remove {
                 if let Ok(id) = role_id.parse::<u64>() {
+                    eprintln!("[TIMING] before remove_role {}: {:?}", id, std::time::Instant::now());
                     let _ = member
                         .remove_role(ctx.http(), serenity::RoleId::new(id))
                         .await;
+                    eprintln!("[TIMING] after remove_role {}: {:?}", id, std::time::Instant::now());
                 }
             }
+            eprintln!("[TIMING] before send response: {:?}", std::time::Instant::now());
             let embed = CreateEmbed::new()
                 .title("Verification Successful")
                 .description(format!("{} has been verified.", target_user.name))
                 .color(COLOR_SUCCESS);
             ctx.send(poise::CreateReply::default().embed(embed)).await?;
+            eprintln!("[TIMING] after send response: {:?}", std::time::Instant::now());
         }
         Ok(None) => {
+            eprintln!("[TIMING] after verify_user API call (not found): {:?}", std::time::Instant::now());
             let embed = CreateEmbed::new()
                 .title("Verification Failed")
                 .description(format!(
@@ -275,6 +289,7 @@ async fn verify(ctx: PoiseContext<'_>) -> Result<(), Error> {
             ctx.send(poise::CreateReply::default().embed(embed)).await?;
         }
         Err(e) => {
+            eprintln!("[TIMING] after verify_user API call (error): {:?}", std::time::Instant::now());
             let embed = CreateEmbed::new()
                 .title("Error")
                 .description(format!("Error during verification: {}", e))
@@ -283,6 +298,7 @@ async fn verify(ctx: PoiseContext<'_>) -> Result<(), Error> {
         }
     }
 
+    eprintln!("[TIMING] verify command finished: {:?}", std::time::Instant::now());
     Ok(())
 }
 
