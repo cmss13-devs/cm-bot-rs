@@ -51,6 +51,12 @@ struct DiscordUserResponse {
 }
 
 #[derive(Debug, Deserialize)]
+struct ApiErrorResponse {
+    pub error: String,
+    pub message: String,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 struct PlayerResponse {
@@ -246,7 +252,9 @@ async fn verify(ctx: PoiseContext<'_>) -> Result<(), Error> {
             }
             for role_id in &user_info.roles_to_remove {
                 if let Ok(id) = role_id.parse::<u64>() {
-                    let _ = member.remove_role(ctx.http(), serenity::RoleId::new(id)).await;
+                    let _ = member
+                        .remove_role(ctx.http(), serenity::RoleId::new(id))
+                        .await;
                 }
             }
             let embed = CreateEmbed::new()
@@ -327,7 +335,9 @@ async fn verify_for(
             }
             for role_id in &user_info.roles_to_remove {
                 if let Ok(id) = role_id.parse::<u64>() {
-                    let _ = member.remove_role(ctx.http(), serenity::RoleId::new(id)).await;
+                    let _ = member
+                        .remove_role(ctx.http(), serenity::RoleId::new(id))
+                        .await;
                 }
             }
             let embed = CreateEmbed::new()
@@ -758,19 +768,24 @@ async fn verify_all(ctx: PoiseContext<'_>) -> Result<(), Error> {
 
                 let mut success = true;
                 for role_id in &user_info.roles_to_add {
-                    if let Ok(id) = role_id.parse::<u64>() {
-                        if let Err(e) = member.add_role(ctx.http(), serenity::RoleId::new(id)).await {
-                            println!("Failed to add role {} to {}: {}", id, member.user.name, e);
-                            success = false;
-                        }
+                    if let Ok(id) = role_id.parse::<u64>()
+                        && let Err(e) = member.add_role(ctx.http(), serenity::RoleId::new(id)).await
+                    {
+                        println!("Failed to add role {} to {}: {}", id, member.user.name, e);
+                        success = false;
                     }
                 }
                 for role_id in &user_info.roles_to_remove {
-                    if let Ok(id) = role_id.parse::<u64>() {
-                        if let Err(e) = member.remove_role(ctx.http(), serenity::RoleId::new(id)).await {
-                            println!("Failed to remove role {} from {}: {}", id, member.user.name, e);
-                            success = false;
-                        }
+                    if let Ok(id) = role_id.parse::<u64>()
+                        && let Err(e) = member
+                            .remove_role(ctx.http(), serenity::RoleId::new(id))
+                            .await
+                    {
+                        println!(
+                            "Failed to remove role {} from {}: {}",
+                            id, member.user.name, e
+                        );
+                        success = false;
                     }
                 }
 
@@ -834,7 +849,10 @@ async fn verify_user(
     discord_id: u64,
     guild_id: u64,
 ) -> Result<Option<DiscordUserResponse>, Error> {
-    let url = format!("{}/api/Discord/Verified/{}/{}", base_url, discord_id, guild_id);
+    let url = format!(
+        "{}/api/Discord/Verified/{}/{}",
+        base_url, discord_id, guild_id
+    );
 
     let response = http_client
         .get(&url)
@@ -848,7 +866,12 @@ async fn verify_user(
     } else if response.status() == reqwest::StatusCode::NOT_FOUND {
         Ok(None)
     } else {
-        Err(format!("API request failed with status: {}", response.status()).into())
+        let status = response.status();
+        if let Ok(error_response) = response.json::<ApiErrorResponse>().await {
+            Err(error_response.message.into())
+        } else {
+            Err(format!("API request failed with status: {}", status).into())
+        }
     }
 }
 
@@ -872,7 +895,12 @@ async fn lookup_discord_user(
     } else if response.status() == reqwest::StatusCode::NOT_FOUND {
         Ok(None)
     } else {
-        Err(format!("API request failed with status: {}", response.status()).into())
+        let status = response.status();
+        if let Ok(error_response) = response.json::<ApiErrorResponse>().await {
+            Err(format!("{}: {}", error_response.error, error_response.message).into())
+        } else {
+            Err(format!("API request failed with status: {}", status).into())
+        }
     }
 }
 
@@ -896,7 +924,12 @@ async fn get_player(
     } else if response.status() == reqwest::StatusCode::NOT_FOUND {
         Ok(None)
     } else {
-        Err(format!("API request failed with status: {}", response.status()).into())
+        let status = response.status();
+        if let Ok(error_response) = response.json::<ApiErrorResponse>().await {
+            Err(format!("{}: {}", error_response.error, error_response.message).into())
+        } else {
+            Err(format!("API request failed with status: {}", status).into())
+        }
     }
 }
 
@@ -926,17 +959,27 @@ impl EventHandler for NewUserHandler {
         {
             Ok(Some(user_info)) => {
                 for role_id in &user_info.roles_to_add {
-                    if let Ok(id) = role_id.parse::<u64>() {
-                        if let Err(e) = new_member.add_role(&ctx.http, serenity::RoleId::new(id)).await {
-                            eprintln!("Failed to add role {} to user {}: {}", id, new_member.user.name, e);
-                        }
+                    if let Ok(id) = role_id.parse::<u64>()
+                        && let Err(e) = new_member
+                            .add_role(&ctx.http, serenity::RoleId::new(id))
+                            .await
+                    {
+                        eprintln!(
+                            "Failed to add role {} to user {}: {}",
+                            id, new_member.user.name, e
+                        );
                     }
                 }
                 for role_id in &user_info.roles_to_remove {
-                    if let Ok(id) = role_id.parse::<u64>() {
-                        if let Err(e) = new_member.remove_role(&ctx.http, serenity::RoleId::new(id)).await {
-                            eprintln!("Failed to remove role {} from user {}: {}", id, new_member.user.name, e);
-                        }
+                    if let Ok(id) = role_id.parse::<u64>()
+                        && let Err(e) = new_member
+                            .remove_role(&ctx.http, serenity::RoleId::new(id))
+                            .await
+                    {
+                        eprintln!(
+                            "Failed to remove role {} from user {}: {}",
+                            id, new_member.user.name, e
+                        );
                     }
                 }
                 println!(
@@ -1022,8 +1065,12 @@ async fn main() -> Result<(), String> {
                         framework.options().commands.len(),
                         guild_id
                     );
-                    poise::builtins::register_in_guild(ctx, &framework.options().commands, *guild_id)
-                        .await?;
+                    poise::builtins::register_in_guild(
+                        ctx,
+                        &framework.options().commands,
+                        *guild_id,
+                    )
+                    .await?;
                 }
                 println!("Commands registered successfully");
                 Ok(BotData {
