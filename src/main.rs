@@ -12,15 +12,18 @@ const COLOR_WARNING: u32 = 0xFEE75C; // Yellow
 const COLOR_INFO: u32 = 0x5865F2; // Blurple
 
 #[derive(Deserialize, Serialize, Clone)]
+struct ServerConfig {
+    verification_channel: u64,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
 struct Config {
     discord_token: String,
     /// mapping of server name to base URL, e.g. {"pvp": "https://db.cm-ss13.com", "pve": "https://pve-db.cm-ss13.com"}
     server_urls: HashMap<String, String>,
     api_token: String,
-    guild_id: u64,
-    verified_role_id: u64,
-    unverified_role_id: u64,
-    verification_channel_id: u64,
+    /// mapping of guild ID to server config
+    servers: HashMap<String, ServerConfig>,
     verification_instructions: String,
     owner_id: u64,
 }
@@ -43,6 +46,8 @@ struct DiscordUserResponse {
     pub ckey: String,
     pub discord_id: String,
     pub authentik_username: Option<String>,
+    pub roles_to_add: Vec<String>,
+    pub roles_to_remove: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -201,7 +206,6 @@ fn build_notes_embeds(notes: &[&NoteResponse], ckey: &str, server: &str) -> Vec<
 #[poise::command(slash_command)]
 async fn verify(ctx: PoiseContext<'_>) -> Result<(), Error> {
     let target_user = ctx.author();
-    let guild_id = ctx.data().config.guild_id;
 
     let Some(current_guild_id) = ctx.guild_id() else {
         let embed = CreateEmbed::new()
@@ -212,7 +216,8 @@ async fn verify(ctx: PoiseContext<'_>) -> Result<(), Error> {
         return Ok(());
     };
 
-    if current_guild_id.get() != guild_id {
+    let guild_id_str = current_guild_id.get().to_string();
+    if !ctx.data().config.servers.contains_key(&guild_id_str) {
         let embed = CreateEmbed::new()
             .title("Error")
             .description("This command is not available in this server.")
@@ -232,20 +237,18 @@ async fn verify(ctx: PoiseContext<'_>) -> Result<(), Error> {
     )
     .await
     {
-        Ok(Some(_user_info)) => {
+        Ok(Some(user_info)) => {
             let member = current_guild_id.member(ctx.http(), target_user.id).await?;
-            member
-                .add_role(
-                    ctx.http(),
-                    serenity::RoleId::new(ctx.data().config.verified_role_id),
-                )
-                .await?;
-            member
-                .remove_role(
-                    ctx.http(),
-                    serenity::RoleId::new(ctx.data().config.unverified_role_id),
-                )
-                .await?;
+            for role_id in &user_info.roles_to_add {
+                if let Ok(id) = role_id.parse::<u64>() {
+                    let _ = member.add_role(ctx.http(), serenity::RoleId::new(id)).await;
+                }
+            }
+            for role_id in &user_info.roles_to_remove {
+                if let Ok(id) = role_id.parse::<u64>() {
+                    let _ = member.remove_role(ctx.http(), serenity::RoleId::new(id)).await;
+                }
+            }
             let embed = CreateEmbed::new()
                 .title("Verification Successful")
                 .description(format!("{} has been verified.", target_user.name))
@@ -285,8 +288,6 @@ async fn verify_for(
     ctx: PoiseContext<'_>,
     #[description = "The user to verify"] user: serenity::User,
 ) -> Result<(), Error> {
-    let guild_id = ctx.data().config.guild_id;
-
     let Some(current_guild_id) = ctx.guild_id() else {
         let embed = CreateEmbed::new()
             .title("Error")
@@ -296,7 +297,8 @@ async fn verify_for(
         return Ok(());
     };
 
-    if current_guild_id.get() != guild_id {
+    let guild_id_str = current_guild_id.get().to_string();
+    if !ctx.data().config.servers.contains_key(&guild_id_str) {
         let embed = CreateEmbed::new()
             .title("Error")
             .description("This command is not available in this server.")
@@ -318,18 +320,16 @@ async fn verify_for(
     {
         Ok(Some(user_info)) => {
             let member = current_guild_id.member(ctx.http(), user.id).await?;
-            member
-                .add_role(
-                    ctx.http(),
-                    serenity::RoleId::new(ctx.data().config.verified_role_id),
-                )
-                .await?;
-            member
-                .remove_role(
-                    ctx.http(),
-                    serenity::RoleId::new(ctx.data().config.unverified_role_id),
-                )
-                .await?;
+            for role_id in &user_info.roles_to_add {
+                if let Ok(id) = role_id.parse::<u64>() {
+                    let _ = member.add_role(ctx.http(), serenity::RoleId::new(id)).await;
+                }
+            }
+            for role_id in &user_info.roles_to_remove {
+                if let Ok(id) = role_id.parse::<u64>() {
+                    let _ = member.remove_role(ctx.http(), serenity::RoleId::new(id)).await;
+                }
+            }
             let embed = CreateEmbed::new()
                 .title("Verification Successful")
                 .description(format!("{} has been verified.", user.name))
@@ -371,8 +371,6 @@ async fn whois(
     ctx: PoiseContext<'_>,
     #[description = "The user to look up"] user: serenity::User,
 ) -> Result<(), Error> {
-    let guild_id = ctx.data().config.guild_id;
-
     let Some(current_guild_id) = ctx.guild_id() else {
         let embed = CreateEmbed::new()
             .title("Error")
@@ -382,7 +380,8 @@ async fn whois(
         return Ok(());
     };
 
-    if current_guild_id.get() != guild_id {
+    let guild_id_str = current_guild_id.get().to_string();
+    if !ctx.data().config.servers.contains_key(&guild_id_str) {
         let embed = CreateEmbed::new()
             .title("Error")
             .description("This command is not available in this server.")
@@ -686,8 +685,6 @@ async fn player(
 /// Verify all members in the server (owner only)
 #[poise::command(slash_command, owners_only)]
 async fn verify_all(ctx: PoiseContext<'_>) -> Result<(), Error> {
-    let guild_id = ctx.data().config.guild_id;
-
     let Some(current_guild_id) = ctx.guild_id() else {
         let embed = CreateEmbed::new()
             .title("Error")
@@ -697,7 +694,8 @@ async fn verify_all(ctx: PoiseContext<'_>) -> Result<(), Error> {
         return Ok(());
     };
 
-    if current_guild_id.get() != guild_id {
+    let guild_id_str = current_guild_id.get().to_string();
+    if !ctx.data().config.servers.contains_key(&guild_id_str) {
         let embed = CreateEmbed::new()
             .title("Error")
             .description("This command is not available in this server.")
@@ -713,9 +711,6 @@ async fn verify_all(ctx: PoiseContext<'_>) -> Result<(), Error> {
         .description("Starting bulk verification of all server members. This may take a while...")
         .color(COLOR_WARNING);
     let progress_message = ctx.send(poise::CreateReply::default().embed(embed)).await?;
-
-    let verified_role_id = serenity::RoleId::new(ctx.data().config.verified_role_id);
-    let unverified_role_id = serenity::RoleId::new(ctx.data().config.unverified_role_id);
 
     let mut all_members = Vec::new();
     let mut last_member_id: Option<serenity::UserId> = None;
@@ -738,7 +733,6 @@ async fn verify_all(ctx: PoiseContext<'_>) -> Result<(), Error> {
 
     let total = all_members.len();
     let mut verified_count = 0u32;
-    let mut already_verified = 0u32;
     let mut failed_count = 0u32;
     let mut not_found_count = 0u32;
     let mut processed_count = 0usize;
@@ -746,12 +740,6 @@ async fn verify_all(ctx: PoiseContext<'_>) -> Result<(), Error> {
 
     for member in all_members {
         if member.user.bot {
-            processed_count += 1;
-            continue;
-        }
-
-        if member.roles.contains(&verified_role_id) {
-            already_verified += 1;
             processed_count += 1;
             continue;
         }
@@ -765,27 +753,35 @@ async fn verify_all(ctx: PoiseContext<'_>) -> Result<(), Error> {
         )
         .await
         {
-            Ok(Some(_user_info)) => {
+            Ok(Some(user_info)) => {
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-                if let Err(e) = member.add_role(ctx.http(), verified_role_id).await {
-                    println!("Failed to add role to {}: {}", member.user.name, e);
-                    failed_count += 1;
-                } else {
+                let mut success = true;
+                for role_id in &user_info.roles_to_add {
+                    if let Ok(id) = role_id.parse::<u64>() {
+                        if let Err(e) = member.add_role(ctx.http(), serenity::RoleId::new(id)).await {
+                            println!("Failed to add role {} to {}: {}", id, member.user.name, e);
+                            success = false;
+                        }
+                    }
+                }
+                for role_id in &user_info.roles_to_remove {
+                    if let Ok(id) = role_id.parse::<u64>() {
+                        if let Err(e) = member.remove_role(ctx.http(), serenity::RoleId::new(id)).await {
+                            println!("Failed to remove role {} from {}: {}", id, member.user.name, e);
+                            success = false;
+                        }
+                    }
+                }
+
+                if success {
                     println!("Verified: {}", member.user.name);
                     verified_count += 1;
+                } else {
+                    failed_count += 1;
                 }
             }
             Ok(None) => {
-                if !member.roles.contains(&unverified_role_id) {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                    if let Err(e) = member.add_role(ctx.http(), unverified_role_id).await {
-                        println!(
-                            "Failed to add unverified role to {}: {}",
-                            member.user.name, e
-                        );
-                    }
-                }
                 not_found_count += 1;
             }
             Err(e) => {
@@ -820,7 +816,6 @@ async fn verify_all(ctx: PoiseContext<'_>) -> Result<(), Error> {
         .title("Bulk Verification Complete")
         .description(format!("Processed {} members", total))
         .field("Newly Verified", verified_count.to_string(), true)
-        .field("Already Verified", already_verified.to_string(), true)
         .field("Not Found", not_found_count.to_string(), true)
         .field("Failed", failed_count.to_string(), true)
         .color(COLOR_SUCCESS);
@@ -913,9 +908,10 @@ struct NewUserHandler {
 #[async_trait]
 impl EventHandler for NewUserHandler {
     async fn guild_member_addition(&self, ctx: Context, new_member: Member) {
-        if new_member.guild_id.get() != self.config.guild_id {
+        let guild_id_str = new_member.guild_id.get().to_string();
+        let Some(server_config) = self.config.servers.get(&guild_id_str) else {
             return;
-        }
+        };
 
         let discord_id = new_member.user.id.get();
 
@@ -929,20 +925,24 @@ impl EventHandler for NewUserHandler {
         .await
         {
             Ok(Some(user_info)) => {
-                if let Err(e) = new_member
-                    .add_role(
-                        &ctx.http,
-                        serenity::RoleId::new(self.config.verified_role_id),
-                    )
-                    .await
-                {
-                    eprintln!("Failed to add role to user {}: {}", new_member.user.name, e);
-                } else {
-                    println!(
-                        "Verified and added role to new member: {} (ckey: {})",
-                        new_member.user.name, user_info.ckey
-                    );
+                for role_id in &user_info.roles_to_add {
+                    if let Ok(id) = role_id.parse::<u64>() {
+                        if let Err(e) = new_member.add_role(&ctx.http, serenity::RoleId::new(id)).await {
+                            eprintln!("Failed to add role {} to user {}: {}", id, new_member.user.name, e);
+                        }
+                    }
                 }
+                for role_id in &user_info.roles_to_remove {
+                    if let Ok(id) = role_id.parse::<u64>() {
+                        if let Err(e) = new_member.remove_role(&ctx.http, serenity::RoleId::new(id)).await {
+                            eprintln!("Failed to remove role {} from user {}: {}", id, new_member.user.name, e);
+                        }
+                    }
+                }
+                println!(
+                    "Verified and updated roles for new member: {} (ckey: {})",
+                    new_member.user.name, user_info.ckey
+                );
             }
             Ok(None) => {
                 println!(
@@ -950,20 +950,7 @@ impl EventHandler for NewUserHandler {
                     new_member.user.name
                 );
 
-                if let Err(e) = new_member
-                    .add_role(
-                        &ctx.http,
-                        serenity::RoleId::new(self.config.unverified_role_id),
-                    )
-                    .await
-                {
-                    eprintln!(
-                        "Failed to add unverified role to user {}: {}",
-                        new_member.user.name, e
-                    );
-                }
-
-                let channel_id = serenity::ChannelId::new(self.config.verification_channel_id);
+                let channel_id = serenity::ChannelId::new(server_config.verification_channel);
                 let embed = CreateEmbed::new()
                     .title("Verification Required")
                     .description(format!(
@@ -1011,7 +998,12 @@ async fn main() -> Result<(), String> {
 
     let config_clone = config.clone();
     let http_client_clone = http_client.clone();
-    let guild_id = serenity::GuildId::new(config.guild_id);
+    let guild_ids: Vec<serenity::GuildId> = config
+        .servers
+        .keys()
+        .filter_map(|id| id.parse::<u64>().ok())
+        .map(serenity::GuildId::new)
+        .collect();
 
     let owners = std::collections::HashSet::from([serenity::UserId::new(config.owner_id)]);
 
@@ -1024,13 +1016,15 @@ async fn main() -> Result<(), String> {
         .setup(move |ctx, ready, framework| {
             Box::pin(async move {
                 println!("Bot logged in as {}", ready.user.name);
-                println!(
-                    "Registering {} commands in guild {}",
-                    framework.options().commands.len(),
-                    guild_id
-                );
-                poise::builtins::register_in_guild(ctx, &framework.options().commands, guild_id)
-                    .await?;
+                for guild_id in &guild_ids {
+                    println!(
+                        "Registering {} commands in guild {}",
+                        framework.options().commands.len(),
+                        guild_id
+                    );
+                    poise::builtins::register_in_guild(ctx, &framework.options().commands, *guild_id)
+                        .await?;
+                }
                 println!("Commands registered successfully");
                 Ok(BotData {
                     config: config_clone,
