@@ -228,6 +228,7 @@ async fn verify(ctx: PoiseContext<'_>) -> Result<(), Error> {
         ctx.data().config.default_base_url(),
         &ctx.data().config.api_token,
         target_user.id.get(),
+        current_guild_id.get(),
     )
     .await
     {
@@ -311,6 +312,7 @@ async fn verify_for(
         ctx.data().config.default_base_url(),
         &ctx.data().config.api_token,
         user.id.get(),
+        current_guild_id.get(),
     )
     .await
     {
@@ -391,7 +393,7 @@ async fn whois(
 
     ctx.defer_ephemeral().await?;
 
-    match verify_user(
+    match lookup_discord_user(
         &ctx.data().http_client,
         ctx.data().config.default_base_url(),
         &ctx.data().config.api_token,
@@ -500,7 +502,7 @@ async fn player(
     let lookup_ckey: String = if let Some(ckey) = ckey {
         ckey
     } else if let Some(user) = &user {
-        match verify_user(
+        match lookup_discord_user(
             &ctx.data().http_client,
             base_url,
             &ctx.data().config.api_token,
@@ -759,6 +761,7 @@ async fn verify_all(ctx: PoiseContext<'_>) -> Result<(), Error> {
             ctx.data().config.default_base_url(),
             &ctx.data().config.api_token,
             member.user.id.get(),
+            current_guild_id.get(),
         )
         .await
         {
@@ -834,6 +837,31 @@ async fn verify_user(
     base_url: &str,
     api_token: &str,
     discord_id: u64,
+    guild_id: u64,
+) -> Result<Option<DiscordUserResponse>, Error> {
+    let url = format!("{}/api/Discord/Verified/{}/{}", base_url, discord_id, guild_id);
+
+    let response = http_client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", api_token))
+        .send()
+        .await?;
+
+    if response.status().is_success() {
+        let user_response: DiscordUserResponse = response.json().await?;
+        Ok(Some(user_response))
+    } else if response.status() == reqwest::StatusCode::NOT_FOUND {
+        Ok(None)
+    } else {
+        Err(format!("API request failed with status: {}", response.status()).into())
+    }
+}
+
+async fn lookup_discord_user(
+    http_client: &reqwest::Client,
+    base_url: &str,
+    api_token: &str,
+    discord_id: u64,
 ) -> Result<Option<DiscordUserResponse>, Error> {
     let url = format!("{}/api/Discord/User/{}", base_url, discord_id);
 
@@ -896,6 +924,7 @@ impl EventHandler for NewUserHandler {
             self.config.default_base_url(),
             &self.config.api_token,
             discord_id,
+            new_member.guild_id.get(),
         )
         .await
         {
