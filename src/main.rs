@@ -211,7 +211,6 @@ fn build_notes_embeds(notes: &[&NoteResponse], ckey: &str, server: &str) -> Vec<
 /// Verify your account against the CM database
 #[poise::command(slash_command)]
 async fn verify(ctx: PoiseContext<'_>) -> Result<(), Error> {
-    eprintln!("[TIMING] verify command started: {:?}", std::time::Instant::now());
     let target_user = ctx.author();
 
     let Some(current_guild_id) = ctx.guild_id() else {
@@ -233,11 +232,8 @@ async fn verify(ctx: PoiseContext<'_>) -> Result<(), Error> {
         return Ok(());
     }
 
-    eprintln!("[TIMING] before defer: {:?}", std::time::Instant::now());
     ctx.defer().await?;
-    eprintln!("[TIMING] after defer: {:?}", std::time::Instant::now());
 
-    eprintln!("[TIMING] before verify_user API call: {:?}", std::time::Instant::now());
     match verify_user(
         &ctx.data().http_client,
         ctx.data().config.default_base_url(),
@@ -248,36 +244,31 @@ async fn verify(ctx: PoiseContext<'_>) -> Result<(), Error> {
     .await
     {
         Ok(Some(user_info)) => {
-            eprintln!("[TIMING] after verify_user API call (success): {:?}", std::time::Instant::now());
-            eprintln!("[TIMING] before member fetch: {:?}", std::time::Instant::now());
             let member = current_guild_id.member(ctx.http(), target_user.id).await?;
-            eprintln!("[TIMING] after member fetch: {:?}", std::time::Instant::now());
+            let current_roles = &member.roles;
             for role_id in &user_info.roles_to_add {
                 if let Ok(id) = role_id.parse::<u64>() {
-                    eprintln!("[TIMING] before add_role {}: {:?}", id, std::time::Instant::now());
-                    let _ = member.add_role(ctx.http(), serenity::RoleId::new(id)).await;
-                    eprintln!("[TIMING] after add_role {}: {:?}", id, std::time::Instant::now());
+                    let role = serenity::RoleId::new(id);
+                    if !current_roles.contains(&role) {
+                        let _ = member.add_role(ctx.http(), role).await;
+                    }
                 }
             }
             for role_id in &user_info.roles_to_remove {
                 if let Ok(id) = role_id.parse::<u64>() {
-                    eprintln!("[TIMING] before remove_role {}: {:?}", id, std::time::Instant::now());
-                    let _ = member
-                        .remove_role(ctx.http(), serenity::RoleId::new(id))
-                        .await;
-                    eprintln!("[TIMING] after remove_role {}: {:?}", id, std::time::Instant::now());
+                    let role = serenity::RoleId::new(id);
+                    if current_roles.contains(&role) {
+                        let _ = member.remove_role(ctx.http(), role).await;
+                    }
                 }
             }
-            eprintln!("[TIMING] before send response: {:?}", std::time::Instant::now());
             let embed = CreateEmbed::new()
                 .title("Verification Successful")
                 .description(format!("{} has been verified.", target_user.name))
                 .color(COLOR_SUCCESS);
             ctx.send(poise::CreateReply::default().embed(embed)).await?;
-            eprintln!("[TIMING] after send response: {:?}", std::time::Instant::now());
         }
         Ok(None) => {
-            eprintln!("[TIMING] after verify_user API call (not found): {:?}", std::time::Instant::now());
             let embed = CreateEmbed::new()
                 .title("Verification Failed")
                 .description(format!(
@@ -289,7 +280,6 @@ async fn verify(ctx: PoiseContext<'_>) -> Result<(), Error> {
             ctx.send(poise::CreateReply::default().embed(embed)).await?;
         }
         Err(e) => {
-            eprintln!("[TIMING] after verify_user API call (error): {:?}", std::time::Instant::now());
             let embed = CreateEmbed::new()
                 .title("Error")
                 .description(format!("Error during verification: {}", e))
@@ -298,7 +288,6 @@ async fn verify(ctx: PoiseContext<'_>) -> Result<(), Error> {
         }
     }
 
-    eprintln!("[TIMING] verify command finished: {:?}", std::time::Instant::now());
     Ok(())
 }
 
@@ -344,16 +333,21 @@ async fn verify_for(
     {
         Ok(Some(user_info)) => {
             let member = current_guild_id.member(ctx.http(), user.id).await?;
+            let current_roles = &member.roles;
             for role_id in &user_info.roles_to_add {
                 if let Ok(id) = role_id.parse::<u64>() {
-                    let _ = member.add_role(ctx.http(), serenity::RoleId::new(id)).await;
+                    let role = serenity::RoleId::new(id);
+                    if !current_roles.contains(&role) {
+                        let _ = member.add_role(ctx.http(), role).await;
+                    }
                 }
             }
             for role_id in &user_info.roles_to_remove {
                 if let Ok(id) = role_id.parse::<u64>() {
-                    let _ = member
-                        .remove_role(ctx.http(), serenity::RoleId::new(id))
-                        .await;
+                    let role = serenity::RoleId::new(id);
+                    if current_roles.contains(&role) {
+                        let _ = member.remove_role(ctx.http(), role).await;
+                    }
                 }
             }
             let embed = CreateEmbed::new()
@@ -782,26 +776,31 @@ async fn verify_all(ctx: PoiseContext<'_>) -> Result<(), Error> {
             Ok(Some(user_info)) => {
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
+                let current_roles = &member.roles;
                 let mut success = true;
                 for role_id in &user_info.roles_to_add {
-                    if let Ok(id) = role_id.parse::<u64>()
-                        && let Err(e) = member.add_role(ctx.http(), serenity::RoleId::new(id)).await
-                    {
-                        println!("Failed to add role {} to {}: {}", id, member.user.name, e);
-                        success = false;
+                    if let Ok(id) = role_id.parse::<u64>() {
+                        let role = serenity::RoleId::new(id);
+                        if !current_roles.contains(&role) {
+                            if let Err(e) = member.add_role(ctx.http(), role).await {
+                                println!("Failed to add role {} to {}: {}", id, member.user.name, e);
+                                success = false;
+                            }
+                        }
                     }
                 }
                 for role_id in &user_info.roles_to_remove {
-                    if let Ok(id) = role_id.parse::<u64>()
-                        && let Err(e) = member
-                            .remove_role(ctx.http(), serenity::RoleId::new(id))
-                            .await
-                    {
-                        println!(
-                            "Failed to remove role {} from {}: {}",
-                            id, member.user.name, e
-                        );
-                        success = false;
+                    if let Ok(id) = role_id.parse::<u64>() {
+                        let role = serenity::RoleId::new(id);
+                        if current_roles.contains(&role) {
+                            if let Err(e) = member.remove_role(ctx.http(), role).await {
+                                println!(
+                                    "Failed to remove role {} from {}: {}",
+                                    id, member.user.name, e
+                                );
+                                success = false;
+                            }
+                        }
                     }
                 }
 
@@ -974,28 +973,31 @@ impl EventHandler for NewUserHandler {
         .await
         {
             Ok(Some(user_info)) => {
+                let current_roles = &new_member.roles;
                 for role_id in &user_info.roles_to_add {
-                    if let Ok(id) = role_id.parse::<u64>()
-                        && let Err(e) = new_member
-                            .add_role(&ctx.http, serenity::RoleId::new(id))
-                            .await
-                    {
-                        eprintln!(
-                            "Failed to add role {} to user {}: {}",
-                            id, new_member.user.name, e
-                        );
+                    if let Ok(id) = role_id.parse::<u64>() {
+                        let role = serenity::RoleId::new(id);
+                        if !current_roles.contains(&role) {
+                            if let Err(e) = new_member.add_role(&ctx.http, role).await {
+                                eprintln!(
+                                    "Failed to add role {} to user {}: {}",
+                                    id, new_member.user.name, e
+                                );
+                            }
+                        }
                     }
                 }
                 for role_id in &user_info.roles_to_remove {
-                    if let Ok(id) = role_id.parse::<u64>()
-                        && let Err(e) = new_member
-                            .remove_role(&ctx.http, serenity::RoleId::new(id))
-                            .await
-                    {
-                        eprintln!(
-                            "Failed to remove role {} from user {}: {}",
-                            id, new_member.user.name, e
-                        );
+                    if let Ok(id) = role_id.parse::<u64>() {
+                        let role = serenity::RoleId::new(id);
+                        if current_roles.contains(&role) {
+                            if let Err(e) = new_member.remove_role(&ctx.http, role).await {
+                                eprintln!(
+                                    "Failed to remove role {} from user {}: {}",
+                                    id, new_member.user.name, e
+                                );
+                            }
+                        }
                     }
                 }
                 println!(
