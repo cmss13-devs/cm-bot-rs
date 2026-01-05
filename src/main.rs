@@ -884,8 +884,8 @@ async fn verify_user(
     if status.is_success() {
         serde_json::from_str::<DiscordUserResponse>(&body).map_err(|e| {
             eprintln!(
-                "Failed to decode verify response for discord_id={}, guild_id={}: {}\nBody: {}",
-                discord_id, guild_id, e, body
+                "Failed to decode verify response from {}: {}\nBody: {}",
+                url, e, body
             );
             format!("Failed to decode response: {}", e).into()
         })
