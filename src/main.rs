@@ -242,7 +242,7 @@ async fn verify(ctx: PoiseContext<'_>) -> Result<(), Error> {
     )
     .await
     {
-        Ok(Some(user_info)) => {
+        Ok(user_info) => {
             let member = current_guild_id.member(ctx.http(), target_user.id).await?;
             let current_roles = &member.roles;
             for role_id in &user_info.roles_to_add {
@@ -261,22 +261,24 @@ async fn verify(ctx: PoiseContext<'_>) -> Result<(), Error> {
                     }
                 }
             }
-            let embed = CreateEmbed::new()
-                .title("Verification Successful")
-                .description(format!("{} has been verified.", target_user.name))
-                .color(COLOR_SUCCESS);
-            ctx.send(poise::CreateReply::default().embed(embed)).await?;
-        }
-        Ok(None) => {
-            let embed = CreateEmbed::new()
-                .title("Verification Failed")
-                .description(format!(
-                    "{} could not be verified. \n\n**How to verify:**\n{}",
-                    target_user.name,
-                    ctx.data().config.verification_instructions
-                ))
-                .color(COLOR_WARNING);
-            ctx.send(poise::CreateReply::default().embed(embed)).await?;
+
+            if !user_info.ckey.is_empty() {
+                let embed = CreateEmbed::new()
+                    .title("Verification Successful")
+                    .description(format!("{} has been verified.", target_user.name))
+                    .color(COLOR_SUCCESS);
+                ctx.send(poise::CreateReply::default().embed(embed)).await?;
+            } else {
+                let embed = CreateEmbed::new()
+                    .title("Verification Failed")
+                    .description(format!(
+                        "{} could not be verified. \n\n**How to verify:**\n{}",
+                        target_user.name,
+                        ctx.data().config.verification_instructions
+                    ))
+                    .color(COLOR_WARNING);
+                ctx.send(poise::CreateReply::default().embed(embed)).await?;
+            }
         }
         Err(e) => {
             let embed = CreateEmbed::new()
@@ -330,7 +332,7 @@ async fn verify_for(
     )
     .await
     {
-        Ok(Some(user_info)) => {
+        Ok(user_info) => {
             let member = current_guild_id.member(ctx.http(), user.id).await?;
             let current_roles = &member.roles;
             for role_id in &user_info.roles_to_add {
@@ -349,23 +351,25 @@ async fn verify_for(
                     }
                 }
             }
-            let embed = CreateEmbed::new()
-                .title("Verification Successful")
-                .description(format!("{} has been verified.", user.name))
-                .field("CKEY", &user_info.ckey, true)
-                .field("Source", &user_info.source, true)
-                .color(COLOR_SUCCESS);
-            ctx.send(poise::CreateReply::default().embed(embed)).await?;
-        }
-        Ok(None) => {
-            let embed = CreateEmbed::new()
-                .title("Verification Failed")
-                .description(format!(
-                    "{} could not be verified. No matching account found in the database.",
-                    user.name
-                ))
-                .color(COLOR_WARNING);
-            ctx.send(poise::CreateReply::default().embed(embed)).await?;
+
+            if !user_info.ckey.is_empty() {
+                let embed = CreateEmbed::new()
+                    .title("Verification Successful")
+                    .description(format!("{} has been verified.", user.name))
+                    .field("CKEY", &user_info.ckey, true)
+                    .field("Source", &user_info.source, true)
+                    .color(COLOR_SUCCESS);
+                ctx.send(poise::CreateReply::default().embed(embed)).await?;
+            } else {
+                let embed = CreateEmbed::new()
+                    .title("Verification Failed")
+                    .description(format!(
+                        "{} could not be verified. No matching account found in the database.",
+                        user.name
+                    ))
+                    .color(COLOR_WARNING);
+                ctx.send(poise::CreateReply::default().embed(embed)).await?;
+            }
         }
         Err(e) => {
             let embed = CreateEmbed::new()
@@ -773,7 +777,7 @@ async fn verify_all(ctx: PoiseContext<'_>) -> Result<(), Error> {
         )
         .await
         {
-            Ok(Some(user_info)) => {
+            Ok(user_info) => {
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
                 let current_roles = &member.roles;
@@ -804,15 +808,14 @@ async fn verify_all(ctx: PoiseContext<'_>) -> Result<(), Error> {
                     }
                 }
 
-                if success {
+                if !success {
+                    failed_count += 1;
+                } else if !user_info.ckey.is_empty() {
                     println!("Verified: {}", member.user.name);
                     verified_count += 1;
                 } else {
-                    failed_count += 1;
+                    not_found_count += 1;
                 }
-            }
-            Ok(None) => {
-                not_found_count += 1;
             }
             Err(e) => {
                 println!("Error verifying {}: {}", member.user.name, e);
@@ -863,7 +866,7 @@ async fn verify_user(
     api_token: &str,
     discord_id: u64,
     guild_id: u64,
-) -> Result<Option<DiscordUserResponse>, Error> {
+) -> Result<DiscordUserResponse, Error> {
     let url = format!(
         "{}/api/Discord/Verified/{}/{}",
         base_url, discord_id, guild_id
@@ -877,9 +880,7 @@ async fn verify_user(
 
     if response.status().is_success() {
         let user_response: DiscordUserResponse = response.json().await?;
-        Ok(Some(user_response))
-    } else if response.status() == reqwest::StatusCode::NOT_FOUND {
-        Ok(None)
+        Ok(user_response)
     } else {
         let status = response.status();
         if let Ok(error_response) = response.json::<ApiErrorResponse>().await {
@@ -972,7 +973,7 @@ impl EventHandler for NewUserHandler {
         )
         .await
         {
-            Ok(Some(user_info)) => {
+            Ok(user_info) => {
                 let current_roles = &new_member.roles;
                 for role_id in &user_info.roles_to_add {
                     if let Ok(id) = role_id.parse::<u64>() {
@@ -1000,40 +1001,42 @@ impl EventHandler for NewUserHandler {
                         }
                     }
                 }
-                println!(
-                    "Verified and updated roles for new member: {} (ckey: {})",
-                    new_member.user.name, user_info.ckey
-                );
-            }
-            Ok(None) => {
-                println!(
-                    "New member {} not found in database, sending verification instructions",
-                    new_member.user.name
-                );
 
-                let channel_id = serenity::ChannelId::new(server_config.verification_channel);
-                let embed = CreateEmbed::new()
-                    .title("Verification Required")
-                    .description(format!(
-                        "Welcome {}! We require you to verify your BYOND account with us before you can join.\n\n{}",
-                        new_member.user.mention(),
-                        self.config.verification_instructions
-                    ))
-                    .color(COLOR_WARNING);
-
-                if let Err(e) = channel_id
-                    .send_message(
-                        &ctx.http,
-                        CreateMessage::new()
-                            .content(format!("{}", new_member.user.mention()))
-                            .embed(embed),
-                    )
-                    .await
-                {
-                    eprintln!(
-                        "Failed to send verification instructions for {}: {}",
-                        new_member.user.name, e
+                if !user_info.ckey.is_empty() {
+                    println!(
+                        "Verified and updated roles for new member: {} (ckey: {})",
+                        new_member.user.name, user_info.ckey
                     );
+                } else {
+                    println!(
+                        "New member {} not found in database, sending verification instructions",
+                        new_member.user.name
+                    );
+
+                    let channel_id = serenity::ChannelId::new(server_config.verification_channel);
+                    let embed = CreateEmbed::new()
+                        .title("Verification Required")
+                        .description(format!(
+                            "Welcome {}! We require you to verify your BYOND account with us before you can join.\n\n{}",
+                            new_member.user.mention(),
+                            self.config.verification_instructions
+                        ))
+                        .color(COLOR_WARNING);
+
+                    if let Err(e) = channel_id
+                        .send_message(
+                            &ctx.http,
+                            CreateMessage::new()
+                                .content(format!("{}", new_member.user.mention()))
+                                .embed(embed),
+                        )
+                        .await
+                    {
+                        eprintln!(
+                            "Failed to send verification instructions for {}: {}",
+                            new_member.user.name, e
+                        );
+                    }
                 }
             }
             Err(e) => {
