@@ -878,16 +878,21 @@ async fn verify_user(
         .send()
         .await?;
 
-    if response.status().is_success() {
-        let user_response: DiscordUserResponse = response.json().await?;
-        Ok(user_response)
+    let status = response.status();
+    let body = response.text().await?;
+
+    if status.is_success() {
+        serde_json::from_str::<DiscordUserResponse>(&body).map_err(|e| {
+            eprintln!(
+                "Failed to decode verify response for discord_id={}, guild_id={}: {}\nBody: {}",
+                discord_id, guild_id, e, body
+            );
+            format!("Failed to decode response: {}", e).into()
+        })
+    } else if let Ok(error_response) = serde_json::from_str::<ApiErrorResponse>(&body) {
+        Err(error_response.message.into())
     } else {
-        let status = response.status();
-        if let Ok(error_response) = response.json::<ApiErrorResponse>().await {
-            Err(error_response.message.into())
-        } else {
-            Err(format!("API request failed with status: {}", status).into())
-        }
+        Err(format!("API request failed with status: {}", status).into())
     }
 }
 
