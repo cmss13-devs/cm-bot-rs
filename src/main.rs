@@ -6,10 +6,10 @@ use poise::serenity_prelude::{
 };
 use serde::{Deserialize, Serialize};
 
-const COLOR_SUCCESS: u32 = 0x57F287; // Green
-const COLOR_ERROR: u32 = 0xED4245; // Red
-const COLOR_WARNING: u32 = 0xFEE75C; // Yellow
-const COLOR_INFO: u32 = 0x5865F2; // Blurple
+const COLOR_SUCCESS: u32 = 0x57F287;
+const COLOR_ERROR: u32 = 0xED4245;
+const COLOR_WARNING: u32 = 0xFEE75C;
+const COLOR_INFO: u32 = 0x5865F2;
 
 #[derive(Deserialize, Serialize, Clone)]
 struct ServerConfig {
@@ -29,11 +29,11 @@ struct Config {
 }
 
 impl Config {
-    /// Get the default base URL (uses "pvp")
     fn default_base_url(&self) -> &str {
         self.server_urls
-            .get("pvp")
-            .map(|s| s.as_str())
+            .iter()
+            .next()
+            .map(|s| s.1.as_str())
             .unwrap_or("")
     }
 }
@@ -118,7 +118,6 @@ struct BotData {
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type PoiseContext<'a> = poise::Context<'a, BotData, Error>;
 
-/// Format a single note as structured text
 fn format_note(note: &NoteResponse) -> String {
     let category = match note.note_category {
         Some(2) => "Merit",
@@ -632,7 +631,8 @@ async fn player(
                 let expiration = player_info
                     .time_ban_expiration
                     .map(|exp| {
-                        const BYOND_EPOCH_UNIX: i64 = 946684800; // Unix timestamp for Jan 1 2000
+                        // Jan 1, 2000
+                        const BYOND_EPOCH_UNIX: i64 = 946684800;
                         let unix_timestamp = BYOND_EPOCH_UNIX + (exp * 60);
                         format!("<t:{}:R>", unix_timestamp)
                     })
@@ -781,25 +781,25 @@ async fn verify_all(ctx: PoiseContext<'_>) -> Result<(), Error> {
                 for role_id in &user_info.roles_to_add {
                     if let Ok(id) = role_id.parse::<u64>() {
                         let role = serenity::RoleId::new(id);
-                        if !current_roles.contains(&role) {
-                            if let Err(e) = member.add_role(ctx.http(), role).await {
-                                println!("Failed to add role {} to {}: {}", id, member.user.name, e);
-                                success = false;
-                            }
+                        if !current_roles.contains(&role)
+                            && let Err(e) = member.add_role(ctx.http(), role).await
+                        {
+                            println!("Failed to add role {} to {}: {}", id, member.user.name, e);
+                            success = false;
                         }
                     }
                 }
                 for role_id in &user_info.roles_to_remove {
                     if let Ok(id) = role_id.parse::<u64>() {
                         let role = serenity::RoleId::new(id);
-                        if current_roles.contains(&role) {
-                            if let Err(e) = member.remove_role(ctx.http(), role).await {
-                                println!(
-                                    "Failed to remove role {} from {}: {}",
-                                    id, member.user.name, e
-                                );
-                                success = false;
-                            }
+                        if current_roles.contains(&role)
+                            && let Err(e) = member.remove_role(ctx.http(), role).await
+                        {
+                            println!(
+                                "Failed to remove role {} from {}: {}",
+                                id, member.user.name, e
+                            );
+                            success = false;
                         }
                     }
                 }
@@ -977,26 +977,26 @@ impl EventHandler for NewUserHandler {
                 for role_id in &user_info.roles_to_add {
                     if let Ok(id) = role_id.parse::<u64>() {
                         let role = serenity::RoleId::new(id);
-                        if !current_roles.contains(&role) {
-                            if let Err(e) = new_member.add_role(&ctx.http, role).await {
-                                eprintln!(
-                                    "Failed to add role {} to user {}: {}",
-                                    id, new_member.user.name, e
-                                );
-                            }
+                        if !current_roles.contains(&role)
+                            && let Err(e) = new_member.add_role(&ctx.http, role).await
+                        {
+                            eprintln!(
+                                "Failed to add role {} to user {}: {}",
+                                id, new_member.user.name, e
+                            );
                         }
                     }
                 }
                 for role_id in &user_info.roles_to_remove {
                     if let Ok(id) = role_id.parse::<u64>() {
                         let role = serenity::RoleId::new(id);
-                        if current_roles.contains(&role) {
-                            if let Err(e) = new_member.remove_role(&ctx.http, role).await {
-                                eprintln!(
-                                    "Failed to remove role {} from user {}: {}",
-                                    id, new_member.user.name, e
-                                );
-                            }
+                        if current_roles.contains(&role)
+                            && let Err(e) = new_member.remove_role(&ctx.http, role).await
+                        {
+                            eprintln!(
+                                "Failed to remove role {} from user {}: {}",
+                                id, new_member.user.name, e
+                            );
                         }
                     }
                 }
