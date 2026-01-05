@@ -17,10 +17,16 @@ struct ServerConfig {
 }
 
 #[derive(Deserialize, Serialize, Clone)]
+struct ServerUrl {
+    url: String,
+    #[serde(default)]
+    default: bool,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
 struct Config {
     discord_token: String,
-    /// mapping of server name to base URL, e.g. {"pvp": "https://db.cm-ss13.com", "pve": "https://pve-db.cm-ss13.com"}
-    server_urls: HashMap<String, String>,
+    server_urls: HashMap<String, ServerUrl>,
     api_token: String,
     /// mapping of guild ID to server config
     servers: HashMap<String, ServerConfig>,
@@ -29,11 +35,25 @@ struct Config {
 }
 
 impl Config {
+    fn validate(&self) -> Result<(), String> {
+        let default_count = self
+            .server_urls
+            .values()
+            .filter(|s| s.default)
+            .count();
+
+        match default_count {
+            0 => Err("No default server_url configured. Exactly one server_url must have 'default = true'.".to_string()),
+            1 => Ok(()),
+            n => Err(format!("Multiple default server_urls configured ({}). Exactly one server_url must have 'default = true'.", n)),
+        }
+    }
+
     fn default_base_url(&self) -> &str {
         self.server_urls
-            .iter()
-            .next()
-            .map(|s| s.1.as_str())
+            .values()
+            .find(|s| s.default)
+            .map(|s| s.url.as_str())
             .unwrap_or("")
     }
 }
@@ -501,7 +521,7 @@ async fn player(
         return Ok(());
     }
 
-    let Some(base_url) = ctx.data().config.server_urls.get(server.as_key()) else {
+    let Some(server_url) = ctx.data().config.server_urls.get(server.as_key()) else {
         let embed = CreateEmbed::new()
             .title("Error")
             .description(format!("Server '{}' is not configured.", server.as_key()))
@@ -514,6 +534,7 @@ async fn player(
         .await?;
         return Ok(());
     };
+    let base_url = &server_url.url;
 
     if ephemeral {
         ctx.defer_ephemeral().await?;
@@ -878,21 +899,16 @@ async fn verify_user(
         .send()
         .await?;
 
-    let status = response.status();
-    let body = response.text().await?;
-
-    if status.is_success() {
-        serde_json::from_str::<DiscordUserResponse>(&body).map_err(|e| {
-            eprintln!(
-                "Failed to decode verify response from {}: {}\nBody: {}",
-                url, e, body
-            );
-            format!("Failed to decode response: {}", e).into()
-        })
-    } else if let Ok(error_response) = serde_json::from_str::<ApiErrorResponse>(&body) {
-        Err(error_response.message.into())
+    if response.status().is_success() {
+        let user_response: DiscordUserResponse = response.json().await?;
+        Ok(user_response)
     } else {
-        Err(format!("API request failed with status: {}", status).into())
+        let status = response.status();
+        if let Ok(error_response) = response.json::<ApiErrorResponse>().await {
+            Err(error_response.message.into())
+        } else {
+            Err(format!("API request failed with status: {}", status).into())
+        }
     }
 }
 
@@ -1059,6 +1075,8 @@ async fn main() -> Result<(), String> {
 
     let config = toml::from_str::<Config>(&config_str)
         .map_err(|err| format!("Error when deserializing config: {err}"))?;
+
+    config.validate()?;
 
     let http_client = reqwest::Client::new();
 
