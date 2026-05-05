@@ -36,11 +36,7 @@ struct Config {
 
 impl Config {
     fn validate(&self) -> Result<(), String> {
-        let default_count = self
-            .server_urls
-            .values()
-            .filter(|s| s.default)
-            .count();
+        let default_count = self.server_urls.values().filter(|s| s.default).count();
 
         match default_count {
             0 => Err("No default server_url configured. Exactly one server_url must have 'default = true'.".to_string()),
@@ -927,7 +923,10 @@ async fn lookup_discord_user(
         .await?;
 
     if response.status().is_success() {
-        let user_response: DiscordUserResponse = response.json().await?;
+        let user_response: DiscordUserResponse = response
+            .json()
+            .await
+            .inspect_err(|e| eprintln!("error decoding user response: {e:?}"))?;
         Ok(Some(user_response))
     } else if response.status() == reqwest::StatusCode::NOT_FOUND {
         Ok(None)
