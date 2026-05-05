@@ -889,6 +889,113 @@ async fn verify_all(ctx: PoiseContext<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+/// Set chat_banned on all currently banned users in this server (owner only)
+#[poise::command(slash_command, owners_only)]
+async fn chat_ban_all(ctx: PoiseContext<'_>) -> Result<(), Error> {
+    let Some(current_guild_id) = ctx.guild_id() else {
+        let embed = CreateEmbed::new()
+            .title("Error")
+            .description("This command must be run in a server.")
+            .color(COLOR_ERROR);
+        ctx.send(poise::CreateReply::default().embed(embed)).await?;
+        return Ok(());
+    };
+
+    let guild_id_str = current_guild_id.get().to_string();
+    if !ctx.data().config.servers.contains_key(&guild_id_str) {
+        let embed = CreateEmbed::new()
+            .title("Error")
+            .description("This command is not available in this server.")
+            .color(COLOR_ERROR);
+        ctx.send(poise::CreateReply::default().embed(embed)).await?;
+        return Ok(());
+    }
+
+    ctx.defer().await?;
+
+    let embed = CreateEmbed::new()
+        .title("Chat Ban Sync Started")
+        .description("Fetching banned users and setting chat_banned attribute...")
+        .color(COLOR_WARNING);
+    let progress_message = ctx.send(poise::CreateReply::default().embed(embed)).await?;
+
+    let mut all_bans = Vec::new();
+    let mut last_user_id: Option<serenity::UserId> = None;
+
+    loop {
+        let pagination = last_user_id.map(serenity::http::UserPagination::After);
+        let bans = current_guild_id.bans(ctx.http(), pagination, Some(100)).await?;
+
+        if bans.is_empty() {
+            break;
+        }
+
+        last_user_id = bans.last().map(|b| b.user.id);
+        all_bans.extend(bans);
+    }
+
+    let total = all_bans.len();
+    let mut success_count = 0u32;
+    let mut failed_count = 0u32;
+    let mut not_found_count = 0u32;
+
+    for (i, ban) in all_bans.iter().enumerate() {
+        match set_chat_banned(
+            &ctx.data().http_client,
+            ctx.data().config.default_base_url(),
+            &ctx.data().config.api_token,
+            ban.user.id.get(),
+            true,
+        )
+        .await
+        {
+            Ok(()) => success_count += 1,
+            Err(e) => {
+                let err_msg = e.to_string();
+                if err_msg.contains("user_not_found") {
+                    not_found_count += 1;
+                } else {
+                    eprintln!("Error chat-banning {}: {}", ban.user.name, e);
+                    failed_count += 1;
+                }
+            }
+        }
+
+        if (i + 1) % 100 == 0 {
+            let progress_embed = CreateEmbed::new()
+                .title("Chat Ban Sync Progress")
+                .description(format!(
+                    "Processed {}/{} banned users ({:.1}%)",
+                    i + 1,
+                    total,
+                    ((i + 1) as f64 / total as f64) * 100.0
+                ))
+                .field("Chat Banned", success_count.to_string(), true)
+                .field("Not Found", not_found_count.to_string(), true)
+                .field("Failed", failed_count.to_string(), true)
+                .color(COLOR_WARNING);
+
+            let _ = progress_message
+                .edit(ctx, poise::CreateReply::default().embed(progress_embed))
+                .await;
+        }
+    }
+
+    let embed = CreateEmbed::new()
+        .title("Chat Ban Sync Complete")
+        .description(format!("Processed {} banned users", total))
+        .field("Chat Banned", success_count.to_string(), true)
+        .field("Not Found", not_found_count.to_string(), true)
+        .field("Failed", failed_count.to_string(), true)
+        .color(COLOR_SUCCESS);
+
+    progress_message
+        .edit(ctx, poise::CreateReply::default().embed(embed))
+        .await?;
+
+    Ok(())
+}
+
 async fn verify_user(
     http_client: &reqwest::Client,
     base_url: &str,
@@ -1200,7 +1307,7 @@ async fn main() -> Result<(), String> {
 
     let framework = poise::Framework::<BotData, Error>::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![verify(), verify_for(), whois(), player(), verify_all()],
+            commands: vec![verify(), verify_for(), whois(), player(), verify_all(), chat_ban_all()],
             owners,
             ..Default::default()
         })
