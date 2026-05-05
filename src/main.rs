@@ -62,7 +62,17 @@ struct DiscordUserResponse {
     pub ckey: String,
     pub discord_id: String,
     pub authentik_username: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct VerifiedUserResponse {
+    pub source: String,
+    pub ckey: String,
+    pub discord_id: String,
+    pub authentik_username: Option<String>,
+    /// Role IDs that should be added to the user
     pub roles_to_add: Vec<String>,
+    /// Role IDs that should be removed from the user
     pub roles_to_remove: Vec<String>,
 }
 
@@ -842,7 +852,7 @@ async fn verify_all(ctx: PoiseContext<'_>) -> Result<(), Error> {
 
         processed_count += 1;
 
-        if processed_count % progress_interval == 0 {
+        if processed_count.is_multiple_of(progress_interval) {
             let progress_embed = CreateEmbed::new()
                 .title("Verification Progress")
                 .description(format!(
@@ -883,7 +893,7 @@ async fn verify_user(
     api_token: &str,
     discord_id: u64,
     guild_id: u64,
-) -> Result<DiscordUserResponse, Error> {
+) -> Result<VerifiedUserResponse, Error> {
     let url = format!(
         "{}/api/Discord/Verified/{}/{}",
         base_url, discord_id, guild_id
@@ -896,7 +906,7 @@ async fn verify_user(
         .await?;
 
     if response.status().is_success() {
-        let user_response: DiscordUserResponse = response.json().await?;
+        let user_response: VerifiedUserResponse = response.json().await?;
         Ok(user_response)
     } else {
         let status = response.status();
