@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use poise::serenity_prelude::{
-    self as serenity, Context, CreateEmbed, CreateMessage, EventHandler, Member, Mentionable,
-    async_trait,
+    self as serenity, Context, CreateEmbed, CreateMessage, EventHandler, GuildId, Member,
+    Mentionable, User, async_trait,
 };
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +14,8 @@ const COLOR_INFO: u32 = 0x5865F2;
 #[derive(Deserialize, Serialize, Clone)]
 struct ServerConfig {
     verification_channel: u64,
+    #[serde(default)]
+    chat_ban_on_discord_ban: bool,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -979,6 +981,43 @@ async fn get_player(
     }
 }
 
+#[derive(Serialize)]
+struct SetChatBannedRequest {
+    discord_id: String,
+    banned: bool,
+}
+
+async fn set_chat_banned(
+    http_client: &reqwest::Client,
+    base_url: &str,
+    api_token: &str,
+    discord_id: u64,
+    banned: bool,
+) -> Result<(), Error> {
+    let url = format!("{}/api/Authentik/SetChatBanned", base_url);
+
+    let response = http_client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", api_token))
+        .json(&SetChatBannedRequest {
+            discord_id: discord_id.to_string(),
+            banned,
+        })
+        .send()
+        .await?;
+
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        let status = response.status();
+        if let Ok(error_response) = response.json::<ApiErrorResponse>().await {
+            Err(format!("{}: {}", error_response.error, error_response.message).into())
+        } else {
+            Err(format!("API request failed with status: {}", status).into())
+        }
+    }
+}
+
 struct NewUserHandler {
     config: Config,
     http_client: reqwest::Client,
@@ -1072,6 +1111,62 @@ impl EventHandler for NewUserHandler {
             Err(e) => {
                 eprintln!("Error verifying new member {}: {}", new_member.user.name, e);
             }
+        }
+    }
+
+    async fn guild_ban_addition(&self, _ctx: Context, guild_id: GuildId, banned_user: User) {
+        let guild_id_str = guild_id.get().to_string();
+        let Some(server_config) = self.config.servers.get(&guild_id_str) else {
+            return;
+        };
+
+        if !server_config.chat_ban_on_discord_ban {
+            return;
+        }
+
+        if let Err(e) = set_chat_banned(
+            &self.http_client,
+            self.config.default_base_url(),
+            &self.config.api_token,
+            banned_user.id.get(),
+            true,
+        )
+        .await
+        {
+            eprintln!(
+                "Error setting chat_banned for {}: {}",
+                banned_user.name, e
+            );
+        } else {
+            println!("Set chat_banned=true for {}", banned_user.name);
+        }
+    }
+
+    async fn guild_ban_removal(&self, _ctx: Context, guild_id: GuildId, unbanned_user: User) {
+        let guild_id_str = guild_id.get().to_string();
+        let Some(server_config) = self.config.servers.get(&guild_id_str) else {
+            return;
+        };
+
+        if !server_config.chat_ban_on_discord_ban {
+            return;
+        }
+
+        if let Err(e) = set_chat_banned(
+            &self.http_client,
+            self.config.default_base_url(),
+            &self.config.api_token,
+            unbanned_user.id.get(),
+            false,
+        )
+        .await
+        {
+            eprintln!(
+                "Error unsetting chat_banned for {}: {}",
+                unbanned_user.name, e
+            );
+        } else {
+            println!("Set chat_banned=false for {}", unbanned_user.name);
         }
     }
 }
