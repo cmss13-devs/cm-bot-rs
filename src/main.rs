@@ -70,7 +70,6 @@ struct DiscordUserResponse {
 pub struct VerifiedUserResponse {
     pub source: String,
     pub ckey: String,
-    pub discord_id: String,
     pub authentik_username: Option<String>,
     /// Role IDs that should be added to the user
     pub roles_to_add: Vec<String>,
@@ -1017,10 +1016,9 @@ async fn verify_user(
         .await?;
 
     if response.status().is_success() {
-        let user_response: VerifiedUserResponse = response
-            .json()
-            .await
-            .inspect_err(|e| eprintln!("Decode error: {e:?}"))?;
+        let text = response.text().await?;
+        let user_response: VerifiedUserResponse = serde_json::from_str(&text)
+            .inspect_err(|e| eprintln!("Decode error: {e:?}, raw: {text}"))?;
         Ok(user_response)
     } else {
         let status = response.status();
