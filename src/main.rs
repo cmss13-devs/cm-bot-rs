@@ -924,7 +924,9 @@ async fn chat_ban_all(ctx: PoiseContext<'_>) -> Result<(), Error> {
 
     loop {
         let pagination = last_user_id.map(serenity::http::UserPagination::After);
-        let bans = current_guild_id.bans(ctx.http(), pagination, Some(100)).await?;
+        let bans = current_guild_id
+            .bans(ctx.http(), pagination, Some(100))
+            .await?;
 
         if bans.is_empty() {
             break;
@@ -1015,7 +1017,10 @@ async fn verify_user(
         .await?;
 
     if response.status().is_success() {
-        let user_response: VerifiedUserResponse = response.json().await?;
+        let user_response: VerifiedUserResponse = response
+            .json()
+            .await
+            .inspect_err(|e| eprintln!("Decode error: {e:?}"))?;
         Ok(user_response)
     } else {
         let status = response.status();
@@ -1240,10 +1245,7 @@ impl EventHandler for NewUserHandler {
         )
         .await
         {
-            eprintln!(
-                "Error setting chat_banned for {}: {}",
-                banned_user.name, e
-            );
+            eprintln!("Error setting chat_banned for {}: {}", banned_user.name, e);
         } else {
             println!("Set chat_banned=true for {}", banned_user.name);
         }
@@ -1307,7 +1309,14 @@ async fn main() -> Result<(), String> {
 
     let framework = poise::Framework::<BotData, Error>::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![verify(), verify_for(), whois(), player(), verify_all(), chat_ban_all()],
+            commands: vec![
+                verify(),
+                verify_for(),
+                whois(),
+                player(),
+                verify_all(),
+                chat_ban_all(),
+            ],
             owners,
             ..Default::default()
         })
