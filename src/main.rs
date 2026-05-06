@@ -71,8 +71,10 @@ pub struct VerifiedUserResponse {
     pub source: String,
     pub ckey: String,
     pub authentik_username: Option<String>,
+    #[serde(rename = "rolesToAdd")]
     /// Role IDs that should be added to the user
     pub roles_to_add: Vec<String>,
+    #[serde(rename = "rolesToRemove")]
     /// Role IDs that should be removed from the user
     pub roles_to_remove: Vec<String>,
 }
@@ -310,7 +312,7 @@ async fn verify(ctx: PoiseContext<'_>) -> Result<(), Error> {
         Err(e) => {
             let embed = CreateEmbed::new()
                 .title("Error")
-                .description(format!("Error during verification: {}", e))
+                .description(format!("Error during verification: {e:?}"))
                 .color(COLOR_ERROR);
             ctx.send(poise::CreateReply::default().embed(embed)).await?;
         }
